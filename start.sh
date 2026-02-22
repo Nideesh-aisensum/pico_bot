@@ -3,6 +3,8 @@
 # Substitute environment variables into config.json
 if [ -n "$NVIDIA_API_KEY" ]; then
   sed -i "s|YOUR_NEW_NVIDIA_API_KEY|$NVIDIA_API_KEY|g" /root/.picoclaw/config.json
+  # Also set it as an environment variable just in case PicoClaw expects it there too
+  export NVIDIA_API_KEY=$NVIDIA_API_KEY
 fi
 if [ -n "$TELEGRAM_TOKEN" ]; then
   sed -i "s|YOUR_TELEGRAM_BOT_TOKEN|$TELEGRAM_TOKEN|g" /root/.picoclaw/config.json
