@@ -1,0 +1,40 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/root/.picoclaw/workspace",
+      "model": "kimi-k2.5",
+      "max_tokens": 8192,
+      "temperature": 1.0,
+      "max_tool_iterations": 20
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "kimi-k2.5",
+      "model": "openai/moonshotai/kimi-k2.5",
+      "api_base": "https://integrate.api.nvidia.com/v1",
+      "api_key": "YOUR_NEW_NVIDIA_API_KEY"
+    },
+    {
+      "model_name": "glm-4",
+      "model": "openai/zhipuai/glm-4-9b-chat",
+      "api_base": "https://integrate.api.nvidia.com/v1",
+      "api_key": "YOUR_NEW_NVIDIA_API_KEY"
+    }
+  ],
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "allowFrom": ["YOUR_NUMERIC_TELEGRAM_USER_ID"]
+    }
+  },
+  "tools": {
+    "web": {
+      "duckduckgo": {
+        "enabled": true,
+        "max_results": 5
+      }
+    }
+  }
+}

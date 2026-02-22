@@ -1,277 +1,192 @@
-Let me search for how to use NVIDIA API with Kimi and GLM models.> ⚠️ **Security Notice First!**
-> You just publicly shared your NVIDIA API key (`nvapi-H3Ri...`). **Please revoke it immediately** and generate a new one at [build.nvidia.com](https://build.nvidia.com) → Settings → API Keys → Delete → Create New. Anyone who sees this chat could use and exhaust your credits.
+You're absolutely right! I completely ignored PicoClaw and just wrote a generic Python Telegram bot. Let me fix that.Good catch! Now I have the real PicoClaw config structure from GitHub. Here's the **correct, complete guide** — using PicoClaw natively with NVIDIA API for Kimi K2.5 or GLM models, deployed on Render.
 
 ---
 
-Now here's the full integration guide using your (new) NVIDIA key with **Kimi K2.5** and **GLM-5** for a Telegram bot on Render.com:
-
----
-
-## 🧠 What's Available on NVIDIA NIM
-
-Both models are fully available on NVIDIA's API:
-
-- **Kimi K2.5** — open-source native multimodal agentic model, supports both instant and thinking modes, 256K context
-- **GLM-5 744B MoE** — enables efficient reasoning for complex systems and long-horizon agentic tasks
-- Both use the same base URL: `https://integrate.api.nvidia.com/v1` and are OpenAI-compatible
-
----
-
-## 📁 Full Project Structure
+## 🗂️ Project Structure
 
 ```
-picoclaw-telegram-bot/
-├── bot.py              ← main Telegram bot
-├── requirements.txt
+picoclaw-nvidia/
+├── config.json          ← PicoClaw config (NVIDIA + Telegram)
 ├── Dockerfile
-├── render.yaml
-└── .env                ← never commit this!
+├── start.sh
+└── render.yaml
 ```
 
 ---
 
-## 📄 `bot.py` — Full Telegram Bot with NVIDIA + Kimi K2.5 / GLM-5
+## 📄 `config.json` — The Real PicoClaw Config
 
-```python
-import os
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from openai import OpenAI
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
+PicoClaw uses a `model_list` format where you define `model_name`, `model` (as `vendor/model-id`), `api_base`, and `api_key`. NVIDIA's API is OpenAI-compatible, so we point it there directly:
 
-# ─── Config ───────────────────────────────────────────────
-TELEGRAM_TOKEN   = os.environ["TELEGRAM_TOKEN"]
-NVIDIA_API_KEY   = os.environ["NVIDIA_API_KEY"]
-ALLOWED_USER_ID  = int(os.environ.get("ALLOWED_USER_ID", "0"))  # 0 = allow all
-
-# Choose your model:
-# "moonshotai/kimi-k2.5"   ← multimodal, thinking mode
-# "zhipuai/glm-5-plus"     ← GLM-5, great for reasoning
-MODEL = os.environ.get("MODEL", "moonshotai/kimi-k2.5")
-
-# ─── NVIDIA Client (OpenAI-compatible) ─────────────────────
-client = OpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key=NVIDIA_API_KEY
-)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Store conversation history per user
-conversations = {}
-
-# ─── Health check server (keeps Render alive) ──────────────
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK - Bot is running!")
-    def log_message(self, format, *args):
-        pass  # suppress logs
-
-def run_health_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    logger.info(f"Health server on port {port}")
-    server.serve_forever()
-
-# ─── Bot Handlers ──────────────────────────────────────────
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    conversations[user_id] = []  # reset history
-    await update.message.reply_text(
-        f"👋 Hello! I'm powered by **{MODEL}** via NVIDIA NIM.\n\n"
-        "Just send me any message to chat!\n"
-        "Use /reset to clear conversation history.\n"
-        "Use /model to switch between Kimi K2.5 and GLM-5.",
-        parse_mode="Markdown"
-    )
-
-async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    conversations[user_id] = []
-    await update.message.reply_text("🔄 Conversation reset!")
-
-async def switch_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MODEL
-    if MODEL == "moonshotai/kimi-k2.5":
-        MODEL = "zhipuai/glm-5-plus"
-        name = "GLM-5"
-    else:
-        MODEL = "moonshotai/kimi-k2.5"
-        name = "Kimi K2.5"
-    await update.message.reply_text(f"✅ Switched to **{name}**!", parse_mode="Markdown")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    # Optional: restrict to only your user ID
-    if ALLOWED_USER_ID != 0 and user_id != ALLOWED_USER_ID:
-        await update.message.reply_text("⛔ Unauthorized.")
-        return
-
-    user_text = update.message.text
-    
-    # Initialize history for new user
-    if user_id not in conversations:
-        conversations[user_id] = []
-
-    # Add user message to history
-    conversations[user_id].append({"role": "user", "content": user_text})
-
-    # Show typing indicator
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-
-    try:
-        # Build request params
-        params = {
-            "model": MODEL,
-            "messages": [
-                {"role": "system", "content": "You are a helpful AI assistant."},
-                *conversations[user_id][-10:]  # keep last 10 messages for context
-            ],
-            "max_tokens": 1024,
-            "temperature": 1.0 if "kimi" in MODEL else 0.7,
-        }
-
-        # Enable thinking mode for Kimi K2.5
-        if "kimi" in MODEL:
-            params["extra_body"] = {"chat_template_kwargs": {"thinking": True}}
-
-        response = client.chat.completions.create(**params)
-        reply = response.choices[0].message.content
-
-        # Save assistant reply to history
-        conversations[user_id].append({"role": "assistant", "content": reply})
-
-        # Split long messages (Telegram limit is 4096 chars)
-        if len(reply) > 4096:
-            for i in range(0, len(reply), 4096):
-                await update.message.reply_text(reply[i:i+4096])
-        else:
-            await update.message.reply_text(reply)
-
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-# ─── Main ──────────────────────────────────────────────────
-if __name__ == "__main__":
-    # Start health server in background thread
-    health_thread = threading.Thread(target=run_health_server, daemon=True)
-    health_thread.start()
-
-    # Start Telegram bot
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("reset", reset))
-    app.add_handler(CommandHandler("model", switch_model))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    logger.info(f"Bot started with model: {MODEL}")
-    app.run_polling()
+```json
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/root/.picoclaw/workspace",
+      "model": "kimi-k2.5",
+      "max_tokens": 8192,
+      "temperature": 1.0,
+      "max_tool_iterations": 20
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "kimi-k2.5",
+      "model": "openai/moonshotai/kimi-k2.5",
+      "api_base": "https://integrate.api.nvidia.com/v1",
+      "api_key": "YOUR_NEW_NVIDIA_API_KEY"
+    },
+    {
+      "model_name": "glm-4",
+      "model": "openai/zhipuai/glm-4-9b-chat",
+      "api_base": "https://integrate.api.nvidia.com/v1",
+      "api_key": "YOUR_NEW_NVIDIA_API_KEY"
+    }
+  ],
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "allowFrom": ["YOUR_NUMERIC_TELEGRAM_USER_ID"]
+    }
+  },
+  "tools": {
+    "web": {
+      "duckduckgo": {
+        "enabled": true,
+        "max_results": 5
+      }
+    }
+  }
+}
 ```
 
----
-
-## 📄 `requirements.txt`
-
-```
-python-telegram-bot==20.7
-openai>=1.30.0
-```
+> ✅ `openai/` prefix tells PicoClaw to use the OpenAI-compatible protocol — which NVIDIA NIM fully supports. The `api_base` overrides the default OpenAI URL to point at NVIDIA.
 
 ---
 
 ## 📄 `Dockerfile`
 
 ```dockerfile
-FROM python:3.11-slim
+FROM debian:bookworm-slim
+
+# Install curl for downloading PicoClaw binary + health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+
+# Download PicoClaw binary (ARM64 or AMD64 based on build platform)
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      curl -L https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw-linux-arm64 -o picoclaw; \
+    else \
+      curl -L https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw-linux-amd64 -o picoclaw; \
+    fi && chmod +x picoclaw
+
+# Copy config
+COPY config.json /root/.picoclaw/config.json
+
+# Create workspace directory
+RUN mkdir -p /root/.picoclaw/workspace
+
+# Copy start script
+COPY start.sh .
+RUN chmod +x start.sh
+
 EXPOSE 8080
-CMD ["python", "bot.py"]
+
+CMD ["./start.sh"]
 ```
 
 ---
 
-## 📄 `render.yaml` (optional — for one-click deploy)
+## 📄 `start.sh` — PicoClaw + Keep-Alive Health Server
+
+```bash
+#!/bin/bash
+
+# Start a simple HTTP health server on PORT (for Render keep-alive)
+PORT=${PORT:-8080}
+
+# Tiny health check server using bash + netcat (no Python needed!)
+health_server() {
+  while true; do
+    echo -e "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK" | nc -l -p $PORT -q 1 2>/dev/null || true
+  done
+}
+
+# Start health server in background
+health_server &
+echo "✅ Health server started on port $PORT"
+
+# Start PicoClaw gateway
+echo "🦐 Starting PicoClaw with NVIDIA + Kimi K2.5..."
+./picoclaw gateway
+```
+
+---
+
+## 📄 `render.yaml`
 
 ```yaml
 services:
   - type: web
-    name: picoclaw-telegram-bot
+    name: picoclaw-nvidia-bot
     runtime: docker
     plan: free
     envVars:
-      - key: TELEGRAM_TOKEN
-        sync: false
-      - key: NVIDIA_API_KEY
-        sync: false
-      - key: ALLOWED_USER_ID
-        sync: false
-      - key: MODEL
-        value: moonshotai/kimi-k2.5
+      - key: PORT
+        value: "8080"
 ```
 
 ---
 
 ## 🚀 Deploy Steps
 
-### 1. Push to GitHub
+### 1. Replace secrets in `config.json`
+Fill in:
+- `YOUR_NEW_NVIDIA_API_KEY` — your new key (after revoking the leaked one)
+- `YOUR_TELEGRAM_BOT_TOKEN` — from @BotFather
+- `YOUR_NUMERIC_TELEGRAM_USER_ID` — from @userinfobot
+
+### 2. Push to GitHub
 ```bash
-git init && git add .
-git commit -m "nvidia kimi telegram bot"
-git remote add origin https://github.com/YOUR_USER/your-bot.git
+git init
+git add .
+git commit -m "picoclaw nvidia kimi telegram"
+git remote add origin https://github.com/YOUR_USER/picoclaw-bot.git
 git push -u origin main
 ```
 
-### 2. Deploy on Render
-1. Go to **render.com** → New → Web Service
-2. Connect your GitHub repo
-3. Set environment variables:
+### 3. Deploy on Render
+- New → Web Service → Connect GitHub repo
+- Runtime: **Docker**, Plan: **Free**
+- Deploy ✅
 
-| Key | Value |
-|---|---|
-| `TELEGRAM_TOKEN` | Your BotFather token |
-| `NVIDIA_API_KEY` | Your **new** NVIDIA key |
-| `ALLOWED_USER_ID` | Your Telegram numeric ID |
-| `MODEL` | `moonshotai/kimi-k2.5` |
-
-4. Runtime: **Docker**, Plan: **Free**
-5. Click **Deploy** — get your URL like `https://your-bot.onrender.com`
-
-### 3. Setup UptimeRobot (Keep-Alive)
-- URL to ping: `https://your-bot.onrender.com`
-- Interval: every **5 minutes**
-- Done ✅
+### 4. Add UptimeRobot pinger
+- URL: `https://your-app.onrender.com`
+- Every 5 minutes → bot stays alive 24/7
 
 ---
 
-## 🎮 Bot Commands in Telegram
+## 🔄 Switching Between Kimi K2.5 and GLM
 
-| Command | Action |
-|---|---|
-| `/start` | Start & reset history |
-| `/reset` | Clear conversation |
-| `/model` | Toggle between Kimi K2.5 ↔ GLM-5 |
-| Any text | Chat with the AI |
+Both models are defined in `model_list`. To switch, just change the `"model"` in `agents.defaults`:
+
+```json
+"model": "kimi-k2.5"   ← uses NVIDIA Kimi K2.5
+"model": "glm-4"       ← uses NVIDIA GLM-4
+```
+
+Or you can message PicoClaw in Telegram: `use model glm-4` — it understands natural language model switching via its agent tools.
 
 ---
 
-## ⚡ Key Differences: Kimi K2.5 vs GLM-5
+## Summary of What's Different Now
 
-| Feature | Kimi K2.5 | GLM-5 |
-|---|---|---|
-| Type | Multimodal VLM | Text/Reasoning MoE |
-| Size | Large | 744B MoE |
-| Context | 256K tokens | 128K tokens |
-| Thinking Mode | ✅ Yes | ✅ Yes |
-| Best for | Images + complex tasks | Long reasoning, coding |
-
-Both are **free** on NVIDIA NIM's developer tier. Just **remember to revoke your leaked key first!** 🔑
+| Before (wrong) | Now (correct) |
+|---|---|
+| Custom Python bot | **Real PicoClaw binary** in Go |
+| Manual Telegram polling code | **PicoClaw `gateway` command** handles Telegram natively |
+| OpenAI SDK manually | **PicoClaw `model_list`** config with NVIDIA base_url |
+| No PicoClaw at all 😅 | 🦐 Full PicoClaw with all its agent tools, web search, heartbeat, etc. |
