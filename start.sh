@@ -1,16 +1,36 @@
 #!/bin/bash
 
+# Debug: verify environment variables are present
+if [ -z "$NVIDIA_API_KEY" ]; then
+  echo "❌ ERROR: NVIDIA_API_KEY is empty or not set in Render Environment Variables!"
+else
+  echo "✅ NVIDIA_API_KEY environment variable is present."
+  # Export as OPENAI_API_KEY since PicoClaw uses OpenAI-compatible protocol
+  export OPENAI_API_KEY=$NVIDIA_API_KEY
+fi
+
+if [ -z "$TELEGRAM_TOKEN" ]; then
+  echo "❌ ERROR: TELEGRAM_TOKEN is empty or not set in Render Environment Variables!"
+else
+  echo "✅ TELEGRAM_TOKEN environment variable is present."
+fi
+
 # Substitute environment variables into config.json
 if [ -n "$NVIDIA_API_KEY" ]; then
   sed -i "s|YOUR_NEW_NVIDIA_API_KEY|$NVIDIA_API_KEY|g" /root/.picoclaw/config.json
-  # Also set it as an environment variable just in case PicoClaw expects it there too
-  export NVIDIA_API_KEY=$NVIDIA_API_KEY
 fi
 if [ -n "$TELEGRAM_TOKEN" ]; then
   sed -i "s|YOUR_TELEGRAM_BOT_TOKEN|$TELEGRAM_TOKEN|g" /root/.picoclaw/config.json
 fi
 if [ -n "$ALLOWED_USER_ID" ]; then
   sed -i "s|\"YOUR_NUMERIC_TELEGRAM_USER_ID\"|$ALLOWED_USER_ID|g" /root/.picoclaw/config.json
+fi
+
+# Very debug: check if config file actually changed without printing the secret
+if grep -q "YOUR_NEW_NVIDIA_API_KEY" /root/.picoclaw/config.json; then
+  echo "❌ ERROR: API key was NOT replaced in config.json!"
+else
+  echo "✅ config.json updated successfully."
 fi
 
 # Start a simple HTTP health server on PORT (for Render keep-alive)
