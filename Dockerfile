@@ -5,13 +5,13 @@ RUN apt-get update && apt-get install -y curl netcat-traditional && rm -rf /var/
 
 WORKDIR /app
 
-# Download PicoClaw binary (ARM64 or AMD64 based on build platform)
+# Download and extract PicoClaw binary (ARM64 or AMD64 based on build platform)
 ARG TARGETARCH
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-      curl -L https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw-linux-arm64 -o picoclaw; \
+      curl -sL https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw_Linux_arm64.tar.gz | tar -xz -C /usr/local/bin picoclaw; \
     else \
-      curl -L https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw-linux-amd64 -o picoclaw; \
-    fi && chmod +x picoclaw
+      curl -sL https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw_Linux_x86_64.tar.gz | tar -xz -C /usr/local/bin picoclaw; \
+    fi && chmod +x /usr/local/bin/picoclaw
 
 # Copy config
 COPY config.json /root/.picoclaw/config.json

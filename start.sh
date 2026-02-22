@@ -27,4 +27,4 @@ echo "✅ Health server started on port $PORT"
 
 # Start PicoClaw gateway
 echo "🦐 Starting PicoClaw with NVIDIA + Kimi K2.5..."
-./picoclaw gateway
+picoclaw gateway
